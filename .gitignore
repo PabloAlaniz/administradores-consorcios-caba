@@ -1,0 +1,24 @@
+# Bytecode de Python
+__pycache__/
+*.py[cod]
+*class java.lang.String
+
+# Distribuciones
+dist/
+build/
+*.egg-info/
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Configuraciones de IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Archivos locales
+.env
+.DS_Store
