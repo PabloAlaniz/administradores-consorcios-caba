@@ -22,3 +22,12 @@ ENV/
 # Archivos locales
 .env
 .DS_Store
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Dataset crudo con datos personales (NO versionar).
+# Se regenera con: python administradores_scraper.py
+*.csv
+# ...pero sí versionamos los agregados anonimizados:
+!data/agregados/*.csv
