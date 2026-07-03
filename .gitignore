@@ -31,3 +31,5 @@ htmlcov/
 *.csv
 # ...pero sí versionamos los agregados anonimizados:
 !data/agregados/*.csv
+!data/snapshots/*/*.csv
+!data/evolutivo/*.csv

@@ -6,11 +6,21 @@ domicilio) y NO se versiona ni se publica. Este script lo lee localmente y
 produce únicamente agregados estadísticos (sin PII) en `data/agregados/`,
 que son los que se publican y consume el notebook de análisis.
 
+Además de actualizar `data/agregados/` (la foto "actual"), puede guardar una
+copia fechada en `data/snapshots/YYYY-MM/` para construir el análisis
+evolutivo (ver `generar_evolutivo.py`).
+
 Uso:
-    python generar_agregados.py [ruta_csv]   # default: administradores.csv
+    python generar_agregados.py [ruta_csv]              # default: administradores.csv
+    python generar_agregados.py --snapshot              # + snapshot del mes actual
+    python generar_agregados.py --snapshot 2026-07      # + snapshot con fecha explícita
 """
-import sys
+import argparse
+import json
 import os
+import re
+from datetime import date, datetime, timezone
+
 import pandas as pd
 
 # Columnas con datos personales que NUNCA deben salir en los agregados.
@@ -22,6 +32,7 @@ PII_COLS = [
 ]
 
 OUTPUT_DIR = os.path.join('data', 'agregados')
+SNAPSHOTS_DIR = os.path.join('data', 'snapshots')
 
 
 def cargar_administradores(ruta_csv):
@@ -123,16 +134,9 @@ def _verificar_sin_pii(path):
         raise SystemExit(f'ERROR: {path} contiene columnas PII: {filtradas}')
 
 
-def main(ruta_csv='administradores.csv'):
-    if not os.path.exists(ruta_csv):
-        raise SystemExit(
-            f'No se encontró {ruta_csv}. Generalo primero con: python administradores_scraper.py'
-        )
-
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    df = cargar_administradores(ruta_csv)
-
-    agregados = {
+def generar_agregados(df):
+    """Devuelve el dict {nombre: DataFrame} con todos los agregados."""
+    return {
         'estado_matricula': estado_matricula(df),
         'tipo_persona': tipo_persona(df),
         'onerosidad': onerosidad(df),
@@ -143,14 +147,70 @@ def main(ruta_csv='administradores.csv'):
         'genero_estimado': genero_estimado(df),
     }
 
+
+def escribir_agregados(agregados, output_dir):
+    """Escribe cada agregado como CSV en `output_dir`, verificando que no haya PII."""
+    os.makedirs(output_dir, exist_ok=True)
     for nombre, tabla in agregados.items():
-        path = os.path.join(OUTPUT_DIR, f'{nombre}.csv')
+        path = os.path.join(output_dir, f'{nombre}.csv')
         tabla.to_csv(path, index=False, encoding='utf-8')
         _verificar_sin_pii(path)
         print(f'  ✓ {path} ({len(tabla)} filas)')
+
+
+def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR):
+    """Guarda una copia fechada de los agregados en `data/snapshots/<snapshot>/`.
+
+    Además escribe un `metadata.json` con los totales del corte, que usa
+    `generar_evolutivo.py` para armar las series de tiempo.
+    """
+    if not re.fullmatch(r'\d{4}-\d{2}', snapshot):
+        raise SystemExit(f"ERROR: snapshot inválido '{snapshot}' (formato esperado: YYYY-MM)")
+
+    snapshot_dir = os.path.join(snapshots_dir, snapshot)
+    escribir_agregados(agregados, snapshot_dir)
+
+    metadata = {
+        'snapshot': snapshot,
+        'generado': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+        'total_administradores': int(len(df)),
+        'total_consorcios': int(df['CANTIDADCONSORCIOS'].sum()),
+        'fuente': 'buscador-admin-consorcio.buenosaires.gob.ar',
+    }
+    meta_path = os.path.join(snapshot_dir, 'metadata.json')
+    with open(meta_path, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, ensure_ascii=False, indent=2)
+    print(f'  ✓ {meta_path}')
+    return snapshot_dir
+
+
+def main(ruta_csv='administradores.csv', snapshot=None):
+    if not os.path.exists(ruta_csv):
+        raise SystemExit(
+            f'No se encontró {ruta_csv}. Generalo primero con: python administradores_scraper.py'
+        )
+
+    df = cargar_administradores(ruta_csv)
+    agregados = generar_agregados(df)
+    escribir_agregados(agregados, OUTPUT_DIR)
+
+    if snapshot:
+        snapshot_dir = escribir_snapshot(agregados, df, snapshot)
+        print(f'\nSnapshot {snapshot} guardado en {snapshot_dir}/')
 
     print(f'\nListo: {len(df)} administradores únicos procesados → {OUTPUT_DIR}/')
 
 
 if __name__ == '__main__':
-    main(sys.argv[1] if len(sys.argv) > 1 else 'administradores.csv')
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('ruta_csv', nargs='?', default='administradores.csv',
+                        help='CSV crudo del scraper (default: administradores.csv)')
+    parser.add_argument('--snapshot', nargs='?', const='__mes_actual__', default=None, metavar='YYYY-MM',
+                        help='guarda además una copia fechada en data/snapshots/YYYY-MM/ '
+                             '(sin valor: usa el mes actual)')
+    args = parser.parse_args()
+
+    snapshot = args.snapshot
+    if snapshot == '__mes_actual__':
+        snapshot = date.today().strftime('%Y-%m')
+    main(args.ruta_csv, snapshot=snapshot)

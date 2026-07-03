@@ -63,8 +63,9 @@ jupyter notebook notebooks/analisis_administradores.ipynb
 Para **regenerar la data desde cero**:
 
 ```bash
-python administradores_scraper.py   # 1. scrapea  -> administradores.csv (local, gitignored)
-python generar_agregados.py         # 2. anonimiza -> data/agregados/*.csv
+python administradores_scraper.py       # 1. scrapea  -> administradores.csv (local, gitignored)
+python generar_agregados.py --snapshot  # 2. anonimiza -> data/agregados/ + snapshot del mes
+python generar_evolutivo.py             # 3. consolida los snapshots -> data/evolutivo/
 ```
 
 ---
@@ -76,13 +77,44 @@ buscador GCBA
      │  administradores_scraper.py  (requests + BeautifulSoup + pandas)
      ▼
 administradores.csv          ← crudo, con PII, LOCAL y gitignored
-     │  generar_agregados.py  (dedup por matrícula + anonimización)
+     │  generar_agregados.py --snapshot  (dedup por matrícula + anonimización)
      ▼
-data/agregados/*.csv         ← agregados sin PII, versionados
+data/agregados/*.csv         ← foto ACTUAL sin PII, versionada
+data/snapshots/YYYY-MM/      ← cortes mensuales fechados (mismos agregados + metadata.json)
+     │  generar_evolutivo.py  (consolida todos los cortes)
+     ▼
+data/evolutivo/*.csv         ← series de tiempo: KPIs por mes + dimensiones en formato largo
      │  notebooks/analisis_administradores.ipynb  (matplotlib + seaborn)
      ▼
 docs/img/*.png + insights    ← gráficos para el README
 ```
+
+---
+
+## 📈 Evolutivo: snapshots mensuales
+
+El padrón cambia todos los meses (altas, bajas, matrículas que se actualizan, sanciones nuevas).
+Para poder analizar esa **evolución en el tiempo**, cada corrida puede guardar un **snapshot fechado**:
+
+```bash
+python generar_agregados.py --snapshot           # snapshot del mes actual
+python generar_agregados.py --snapshot 2026-07   # o con fecha explícita
+python generar_evolutivo.py                      # reconstruye data/evolutivo/
+```
+
+- `data/snapshots/YYYY-MM/` — los mismos agregados anonimizados de siempre, congelados a la fecha
+  del corte, más un `metadata.json` con los totales.
+- `data/evolutivo/resumen.csv` — un registro por snapshot con los KPIs principales (total de
+  administradores, matrículas activas, concentración del top 5%, sanciones…) y su **variación
+  contra el mes anterior** (`var_*`).
+- `data/evolutivo/evolucion_*.csv` — cada dimensión categórica en formato largo
+  (`snapshot, categoría, cantidad`), lista para graficar líneas de tendencia.
+
+La captura mensual está automatizada con **GitHub Actions**
+([`.github/workflows/snapshot-mensual.yml`](.github/workflows/snapshot-mensual.yml)): el día 1 de
+cada mes scrapea el padrón, genera el snapshot y commitea solo los agregados sin PII (el CSV crudo
+vive únicamente en el runner efímero y se descarta). También se puede disparar a mano desde la
+pestaña *Actions* (`workflow_dispatch`).
 
 ---
 
@@ -92,10 +124,14 @@ docs/img/*.png + insights    ← gráficos para el README
 Administradores-Consorcios/
 ├── administradores_scraper.py   # Scraper modular (recomendado)
 ├── main.py                      # Versión monolítica original (legacy)
-├── generar_agregados.py         # Anonimiza y agrega el CSV crudo
+├── generar_agregados.py         # Anonimiza y agrega el CSV crudo (--snapshot para corte mensual)
+├── generar_evolutivo.py         # Consolida los snapshots en series de tiempo
 ├── notebooks/
 │   └── analisis_administradores.ipynb
-├── data/agregados/              # Datasets agregados (sin PII, versionados)
+├── data/
+│   ├── agregados/               # Foto actual (sin PII, versionada)
+│   ├── snapshots/YYYY-MM/       # Cortes mensuales fechados
+│   └── evolutivo/               # Series de tiempo consolidadas
 ├── docs/img/                    # Gráficos generados por el notebook
 ├── tests/                       # Tests unitarios (pytest)
 ├── .github/workflows/ci.yml     # CI: ruff + pytest
