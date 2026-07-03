@@ -1,2 +1,2 @@
-snapshot,total_administradores,total_consorcios,matriculas_activas,matriculas_sin_actualizar,sancionados,sin_consorcios,pct_top_1,pct_top_5,pct_top_10,pct_sancionados,pct_sin_consorcios,var_total_administradores,var_total_consorcios,var_matriculas_activas
-2026-07,5671,7744,2184,3487,106,3834,30.9,67.4,79.2,1.9,67.6,,,
+snapshot,total_administradores,total_consorcios,matriculas_activas,matriculas_sin_actualizar,sancionados,sin_consorcios,pct_top_1,pct_top_5,pct_top_10,gini,hhi,pct_sancionados,pct_sin_consorcios,var_total_administradores,var_total_consorcios,var_matriculas_activas
+2026-07,3856,1560,1071,2785,52,2640,8.5,28.8,46.8,0.7407,9.9,1.3,68.5,,,

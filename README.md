@@ -63,9 +63,10 @@ jupyter notebook notebooks/analisis_administradores.ipynb
 Para **regenerar la data desde cero**:
 
 ```bash
-python administradores_scraper.py       # 1. scrapea  -> administradores.csv (local, gitignored)
-python generar_agregados.py --snapshot  # 2. anonimiza -> data/agregados/ + snapshot del mes
-python generar_evolutivo.py             # 3. consolida los snapshots -> data/evolutivo/
+python administradores_scraper.py         # 1. scrapea  -> administradores.csv (local, gitignored)
+python generar_agregados.py --snapshot    # 2. anonimiza -> data/agregados/ + snapshot del mes
+python generar_evolutivo.py               # 3. consolida los snapshots -> data/evolutivo/
+python generar_graficos_evolutivo.py      # 4. gráficos de tendencia -> docs/img/evolucion_*.png
 ```
 
 ---
@@ -80,11 +81,11 @@ administradores.csv          ← crudo, con PII, LOCAL y gitignored
      │  generar_agregados.py --snapshot  (dedup por matrícula + anonimización)
      ▼
 data/agregados/*.csv         ← foto ACTUAL sin PII, versionada
-data/snapshots/YYYY-MM/      ← cortes mensuales fechados (mismos agregados + metadata.json)
+data/snapshots/YYYY-MM/      ← cortes mensuales fechados (agregados + panel pseudonimizado + metadata)
      │  generar_evolutivo.py  (consolida todos los cortes)
      ▼
-data/evolutivo/*.csv         ← series de tiempo: KPIs por mes + dimensiones en formato largo
-     │  notebooks/analisis_administradores.ipynb  (matplotlib + seaborn)
+data/evolutivo/*.csv + .md   ← series de tiempo, flujos, Gini/HHI y reporte mensual narrado
+     │  generar_graficos_evolutivo.py / notebook  (matplotlib + seaborn)
      ▼
 docs/img/*.png + insights    ← gráficos para el README
 ```
@@ -100,15 +101,37 @@ Para poder analizar esa **evolución en el tiempo**, cada corrida puede guardar 
 python generar_agregados.py --snapshot           # snapshot del mes actual
 python generar_agregados.py --snapshot 2026-07   # o con fecha explícita
 python generar_evolutivo.py                      # reconstruye data/evolutivo/
+python generar_graficos_evolutivo.py             # gráficos de tendencia en docs/img/
 ```
 
-- `data/snapshots/YYYY-MM/` — los mismos agregados anonimizados de siempre, congelados a la fecha
-  del corte, más un `metadata.json` con los totales.
-- `data/evolutivo/resumen.csv` — un registro por snapshot con los KPIs principales (total de
-  administradores, matrículas activas, concentración del top 5%, sanciones…) y su **variación
-  contra el mes anterior** (`var_*`).
-- `data/evolutivo/evolucion_*.csv` — cada dimensión categórica en formato largo
-  (`snapshot, categoría, cantidad`), lista para graficar líneas de tendencia.
+**Qué guarda cada snapshot** (`data/snapshots/YYYY-MM/`):
+
+- Los agregados anonimizados de siempre, congelados a la fecha del corte, más un `metadata.json`
+  con los totales.
+- Dimensión **geográfica**: administradores por comuna (USIG) y por código postal del domicilio
+  del administrador. La comuna todavía tiene poca cobertura en el padrón oficial; el CP cubre ~94%,
+  y el evolutivo permite ver cómo mejora esa cobertura con el tiempo.
+- `matriculas.csv`: un **panel pseudonimizado** (matrícula hasheada + estado + cantidad de
+  consorcios + sanciones — todos atributos ya públicos en el buscador oficial; nunca nombre,
+  CUIT ni domicilio). Es lo que permite calcular flujos reales entre meses.
+
+**Qué produce el evolutivo** (`data/evolutivo/`):
+
+- `resumen.csv` — un registro por snapshot con los KPIs principales (total de administradores,
+  matrículas activas, concentración del top 1/5/10%, **índices de Gini y HHI**, sanciones…) y su
+  **variación contra el mes anterior** (`var_*`). Gini y HHI se calculan desde la distribución
+  agregada, así que funcionan retroactivamente para todos los snapshots.
+- `flujos.csv` — movimientos **brutos** entre cortes consecutivos: altas y bajas del padrón,
+  matrículas que se activaron o desactivaron, sancionados nuevos y administradores que ganaron
+  o perdieron consorcios. Un +20 neto puede ser 25 altas y 5 bajas: esto lo hace visible.
+- `evolucion_*.csv` — cada dimensión categórica (estado, tipo de persona, comuna, CP…) en formato
+  largo (`snapshot, categoría, cantidad`), lista para graficar líneas de tendencia.
+- `reporte_YYYY-MM.md` — **reporte narrado** del último corte con todas las variaciones,
+  regenerado en cada corrida.
+
+**Gráficos de tendencia**: `generar_graficos_evolutivo.py` produce `docs/img/evolucion_padron.png`
+y `docs/img/evolucion_concentracion.png` a partir del resumen (con un solo snapshot son puntos;
+las líneas aparecen a medida que se acumulan cortes).
 
 La captura mensual está automatizada con **GitHub Actions**
 ([`.github/workflows/snapshot-mensual.yml`](.github/workflows/snapshot-mensual.yml)): el día 1 de
@@ -125,7 +148,8 @@ Administradores-Consorcios/
 ├── administradores_scraper.py   # Scraper modular (recomendado)
 ├── main.py                      # Versión monolítica original (legacy)
 ├── generar_agregados.py         # Anonimiza y agrega el CSV crudo (--snapshot para corte mensual)
-├── generar_evolutivo.py         # Consolida los snapshots en series de tiempo
+├── generar_evolutivo.py         # Series de tiempo, flujos, Gini/HHI y reporte mensual
+├── generar_graficos_evolutivo.py # Gráficos de tendencia desde el evolutivo
 ├── notebooks/
 │   └── analisis_administradores.ipynb
 ├── data/

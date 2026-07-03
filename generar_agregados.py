@@ -16,6 +16,7 @@ Uso:
     python generar_agregados.py --snapshot 2026-07      # + snapshot con fecha explícita
 """
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -126,6 +127,49 @@ def genero_estimado(df):
     return out
 
 
+def comuna_administrador(df):
+    """Administradores por comuna (USIG) del domicilio del administrador.
+
+    El campo lo carga el GCBA y hoy tiene poca cobertura; se agrega igual
+    para poder seguir su evolución a medida que el padrón se actualiza.
+    """
+    if 'COMUNAUSIGADMINISTRADOR' not in df.columns:
+        return None
+    comuna = (df['COMUNAUSIGADMINISTRADOR'].fillna('').astype(str).str.strip()
+              .replace('', 'Sin dato'))
+    out = comuna.value_counts(dropna=False).rename_axis('comuna')
+    return out.reset_index(name='cantidad')
+
+
+def cp_administrador(df):
+    """Administradores por código postal (4 dígitos) del domicilio del administrador."""
+    if 'CPADMINISTRADOR' not in df.columns:
+        return None
+    cp = df['CPADMINISTRADOR'].astype(str).str.extract(r'(\d{4})', expand=False).fillna('Sin dato')
+    out = cp.value_counts(dropna=False).rename_axis('codigo_postal')
+    return out.reset_index(name='cantidad').sort_values('codigo_postal').reset_index(drop=True)
+
+
+def panel_matriculas(df):
+    """Panel pseudonimizado, una fila por matrícula, para calcular flujos entre cortes.
+
+    La matrícula se publica hasheada (SHA-256 truncado). El número de matrícula
+    ya es público en el buscador oficial, y acá solo se exponen atributos que
+    también son públicos (estado, cantidad de consorcios, sanciones) — nunca
+    nombre, CUIT ni domicilio. El hash es estable entre snapshots, que es lo
+    que permite calcular altas, bajas y transiciones de estado.
+    """
+    hashes = df['MATRICULAID'].astype(str).map(
+        lambda m: hashlib.sha256(m.encode('utf-8')).hexdigest()[:16]
+    )
+    return pd.DataFrame({
+        'matricula_hash': hashes,
+        'estado': df['ESTADOMATRICULADESC'].astype(str).str.strip(),
+        'cantidad_consorcios': df['CANTIDADCONSORCIOS'].astype(int),
+        'tiene_sanciones': _normalizar_si_no(df['TIENESANCIONES']),
+    }).reset_index(drop=True)
+
+
 def _verificar_sin_pii(path):
     """Falla si algún agregado contiene columnas con PII."""
     cols = pd.read_csv(path, nrows=0).columns
@@ -136,7 +180,7 @@ def _verificar_sin_pii(path):
 
 def generar_agregados(df):
     """Devuelve el dict {nombre: DataFrame} con todos los agregados."""
-    return {
+    agregados = {
         'estado_matricula': estado_matricula(df),
         'tipo_persona': tipo_persona(df),
         'onerosidad': onerosidad(df),
@@ -145,7 +189,11 @@ def generar_agregados(df):
         'concentracion': concentracion(df),
         'altas_por_anio': altas_por_anio(df),
         'genero_estimado': genero_estimado(df),
+        # Geográficos: pueden faltar en CSVs crudos viejos sin esas columnas.
+        'comuna_administrador': comuna_administrador(df),
+        'cp_administrador': cp_administrador(df),
     }
+    return {nombre: tabla for nombre, tabla in agregados.items() if tabla is not None}
 
 
 def escribir_agregados(agregados, output_dir):
@@ -169,6 +217,14 @@ def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR):
 
     snapshot_dir = os.path.join(snapshots_dir, snapshot)
     escribir_agregados(agregados, snapshot_dir)
+
+    # El panel pseudonimizado va solo en el snapshot (es propio de cada corte):
+    # es lo que permite calcular flujos (altas/bajas/transiciones) entre meses.
+    panel = panel_matriculas(df)
+    panel_path = os.path.join(snapshot_dir, 'matriculas.csv')
+    panel.to_csv(panel_path, index=False, encoding='utf-8')
+    _verificar_sin_pii(panel_path)
+    print(f'  ✓ {panel_path} ({len(panel)} filas)')
 
     metadata = {
         'snapshot': snapshot,
