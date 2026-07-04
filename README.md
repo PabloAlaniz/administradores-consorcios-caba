@@ -5,7 +5,8 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 Scraper en **Python** del [buscador oficial de administradores de consorcios](https://buscador-admin-consorcio.buenosaires.gob.ar/administradores)
-del Gobierno de la Ciudad de Buenos Aires, con un **análisis exploratorio** de los ~5.700 administradores registrados.
+del Gobierno de la Ciudad de Buenos Aires, con un **análisis exploratorio** de los ~3.900 administradores
+registrados (corte julio 2026) y un **evolutivo** con snapshots mensuales del padrón.
 
 > **Stack:** Python · requests · BeautifulSoup · pandas · matplotlib · seaborn · pytest
 
@@ -13,38 +14,44 @@ del Gobierno de la Ciudad de Buenos Aires, con un **análisis exploratorio** de 
 
 ## 📊 Análisis de datos
 
-A partir de los datos públicos se construyó un dataset de **5.671 administradores únicos**
-(corte de **junio 2026**). El análisis completo, reproducible y narrado está en
-[`notebooks/analisis_administradores.ipynb`](notebooks/analisis_administradores.ipynb).
+A partir de los datos públicos se construyó un dataset de **3.856 administradores únicos**
+(corte **julio 2026**, verificado con un doble check contra el endpoint: devuelve el padrón
+completo, sin paginación, estable entre requests). El análisis completo, reproducible y narrado
+está en [`notebooks/analisis_administradores.ipynb`](notebooks/analisis_administradores.ipynb).
 
-> ⚠️ **El padrón cambió después de este análisis.** En julio 2026 el buscador oficial pasó a
-> devolver ~3.856 matrículas y cifras de consorcios muy distintas. El cambio quedó documentado,
-> tal cual se observó, en la sección [Evolutivo](#-evolutivo-snapshots-mensuales).
+> 📉 **El padrón se achicó un tercio desde 2024.** El análisis original (corte ~marzo 2024)
+> registraba 5.671 administradores. La historia completa del cambio, con hipótesis y evidencia,
+> está en la sección [Evolutivo](#-evolutivo-snapshots-mensuales).
 
-Algunos hallazgos del corte de junio 2026:
+Algunos hallazgos del corte de julio 2026:
 
-### El mercado está muy concentrado
+### Concentración moderada (según el endpoint actual)
 
 ![Concentración del mercado](docs/img/concentracion.png)
 
-El **top 5% de los administradores (≈284 personas) maneja cerca del 67% de todos los consorcios**.
-La mayoría administra 0 o 1, mientras que un puñado supera los **100 consorcios** a cargo.
+El **top 5% de los administradores (≈193 personas) maneja el 28,8% de los consorcios** y nadie
+supera los **6** a cargo. El corte de 2024 mostraba otra escala (top 5% = 67%, administradores con
++100 consorcios): un cambio tan drástico sugiere que el campo `CANTIDADCONSORCIOS` del endpoint
+cambió de semántica — está documentado en el evolutivo.
 
 ![Distribución de consorcios por administrador](docs/img/distribucion_consorcios.png)
 
-### Boom de inscripciones desde 2018
+### El boom de inscripciones se mudó a 2021–2024
 
 ![Altas por año](docs/img/altas_por_anio.png)
 
-Las altas se disparan a partir de **2018** (pico en 2018–2019) y se mantienen altas aún durante la pandemia.
+Las altas se aceleran desde **2021** y tocan su máximo en **2024** (595). En 2025 se frenan (237)
+y **2026 aún no registra altas** pese a que el padrón tiene actualizaciones hasta mayo 2026.
+Ojo con el sesgo de supervivencia: las cohortes viejas están subrepresentadas porque el corte
+actual ya no incluye a quienes salieron del padrón.
 
-### Padrón inflado y perfil de la actividad
+### Padrón depurado pero aún inflado
 
 ![Estado de la matrícula](docs/img/estado_matricula.png)
 
-Más del **60% de las matrículas están "sin actualizar"** y ~68% no administra ningún consorcio. Además:
-~80% cobra honorarios, solo el **1,9% registra sanciones**, y la actividad está **equilibrada por género**
-(estimado por prefijo de CUIT).
+El **72% de las matrículas están "sin actualizar"** y ~68% no administra ningún consorcio. Además:
+~84% cobra honorarios, solo el **1,3% registra sanciones**, y la actividad está **equilibrada por
+género con leve mayoría femenina** (estimado por prefijo de CUIT; en 2024 la mayoría era masculina).
 
 > 🔒 **Privacidad:** el análisis usa exclusivamente datos **agregados y anonimizados**
 > (`data/agregados/`). El dataset crudo contiene datos personales (nombre, CUIT, domicilio) y **no se
@@ -138,36 +145,46 @@ python generar_graficos_evolutivo.py             # gráficos de tendencia en doc
 y `docs/img/evolucion_concentracion.png` a partir del resumen (con un solo snapshot son puntos;
 las líneas aparecen a medida que se acumulan cortes).
 
-### 🔍 El evolutivo en acción: el padrón cambió entre junio y julio 2026
+### 🔍 El evolutivo en acción: el padrón se achicó un tercio entre 2024 y 2026
 
 El primer corte scrapeado en vivo (julio 2026) devolvió un padrón **muy** distinto al del análisis
-original (junio 2026). Lejos de esconder la discrepancia, es exactamente el tipo de cambio que este
-sistema existe para registrar — así que ambos cortes están versionados como snapshots y el salto
-queda a la vista:
+original. Lejos de esconder la discrepancia, es exactamente el tipo de cambio que este sistema
+existe para registrar — ambos cortes están versionados como snapshots y el salto queda a la vista:
 
-| Métrica | 2026-06 | 2026-07 | Δ |
+| Métrica | ~2024-03 | 2026-07 | Δ |
 |---|---:|---:|---:|
-| Administradores registrados | 5.671 | 3.856 | **−1.815** |
-| Consorcios administrados | 7.744 | 1.560 | **−6.184** |
+| Administradores registrados | 5.671 | 3.856 | **−1.815 (−32%)** |
+| Consorcios informados | 7.744 | 1.560 | **−6.184** |
 | Matrículas activas | 2.184 | 1.071 | −1.113 |
 | Máx. consorcios por administrador | 100+ | 6 | — |
 | Top 5% concentra | 67,4% | 28,8% | −38,6 pp |
 
 ![Evolución del padrón](docs/img/evolucion_padron.png)
 
-**Qué puede haber pasado** (no es determinable solo desde los datos):
+**El doble check que hicimos antes de creer los números:**
 
-1. **Depuración del padrón**: el GCBA dio de baja matrículas no renovadas — consistente con que
-   la obligación de renovación anual figura en los propios mensajes del buscador.
-2. **Cambio en el endpoint**: la respuesta pasó de pares *(administrador, consorcio)* a una fila
-   por administrador, y `CANTIDADCONSORCIOS` puede haber cambiado de semántica (p. ej. solo
-   consorcios con declaración vigente).
+- El corte de julio 2026 se verificó contra el endpoint: **ignora todos los filtros del payload**
+  y devuelve siempre el padrón completo — 3.856 matrículas únicas, sin paginación, estable en
+  5 requests consecutivos. El número es real, no un truncamiento.
+- La fecha del corte original estaba mal atribuida: el dataset entró al repo en junio 2026, pero
+  la distribución de altas lo delata — su cohorte 2024 estaba ~19% completa (115 de 595 altas) y
+  2025 no existía. **El scrape original es de ~marzo 2024**, así que la caída ocurrió a lo largo
+  de ~2 años, no de un mes.
 
-Probablemente sea una combinación de ambas. La política del repo es **documentar lo observado tal
-cual**: cada snapshot lleva su `nota` metodológica en `metadata.json`, que se propaga
-automáticamente al reporte mensual ([`reporte_2026-07.md`](data/evolutivo/reporte_2026-07.md)).
-Los próximos cortes mensuales van a mostrar si los números se estabilizan en el nuevo nivel
-(depuración) o siguen moviéndose (cambio de semántica).
+**Qué muestra la evidencia:**
+
+1. **Depuración gradual del padrón**: la pérdida se concentra en las cohortes 2010–2020
+   (−50/65%), mientras las recientes (2021–2023) apenas pierden 9–16% — consistente con bajas
+   por falta de renovación anual acumuladas en dos años.
+2. **Cambio de semántica del endpoint**: la respuesta pasó de pares *(administrador, consorcio)*
+   a una fila por administrador, y `CANTIDADCONSORCIOS` cambió de escala (máx. 6 vs +100), algo
+   que la depuración sola no explica — posiblemente ahora cuente solo consorcios con declaración
+   vigente.
+
+La política del repo es **documentar lo observado tal cual**: cada snapshot lleva su `nota`
+metodológica en `metadata.json`, que se propaga automáticamente al reporte mensual
+([`reporte_2026-07.md`](data/evolutivo/reporte_2026-07.md)). Los próximos cortes mensuales van a
+mostrar si los números se estabilizan en el nuevo nivel o siguen moviéndose.
 
 La captura mensual está automatizada con **GitHub Actions**
 ([`.github/workflows/snapshot-mensual.yml`](.github/workflows/snapshot-mensual.yml)): el día 1 de

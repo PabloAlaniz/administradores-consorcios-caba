@@ -4,5 +4,5 @@
   "total_administradores": 3856,
   "total_consorcios": 1560,
   "fuente": "buscador-admin-consorcio.buenosaires.gob.ar",
-  "nota": "Primer corte scrapeado en vivo tras el release. El endpoint devolvió 3.856 matrículas contra 5.671 del corte 2026-06, y la cantidad de consorcios informada por administrador también cambió drásticamente (máximo 6 vs más de 100). Puede tratarse de una depuración del padrón por parte del GCBA o de un cambio en la semántica del endpoint; se documenta tal cual se observó. Ver README, sección Evolutivo."
+  "nota": "Primer corte scrapeado en vivo tras el release, verificado con un segundo check: el endpoint ignora los filtros del payload y devuelve siempre el padrón completo (3.856 matrículas únicas, sin paginación, estable en 5 requests consecutivos). Contra el corte anterior (~marzo 2024) el padrón cayó de 5.671 a 3.856, concentrado en cohortes 2010-2020 (-50/65%), consistente con una depuración gradual por falta de renovación. La cantidad de consorcios informada (máx. 6 por administrador vs +100 antes) sugiere además un cambio de semántica en CANTIDADCONSORCIOS del endpoint. Se documenta tal cual se observó; ver README, sección Evolutivo."
 }

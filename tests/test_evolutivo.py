@@ -201,7 +201,7 @@ class TestEvolutivo:
 
         texto = open(path, encoding='utf-8').read()
         assert '2026-08' in path and '# Reporte del padrón — 2026-08' in texto
-        assert 'vs mes anterior' in texto
+        assert 'vs corte 2026-07' in texto
         assert 'Flujos del mes (vs 2026-07)' in texto
         assert 'Altas al padrón: **1**' in texto
 

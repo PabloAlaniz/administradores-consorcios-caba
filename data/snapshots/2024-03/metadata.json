@@ -1,0 +1,8 @@
+{
+  "snapshot": "2024-03",
+  "generado": null,
+  "total_administradores": 5671,
+  "total_consorcios": 7744,
+  "fuente": "buscador-admin-consorcio.buenosaires.gob.ar",
+  "nota": "Snapshot histórico reconstruido desde data/agregados/ (dataset del análisis original, commiteado al repo el 2026-06-14). La fecha real del scrape se estimó desde la distribución de altas por año: la cohorte 2024 estaba ~19% completa (115 de 595 altas) y 2025 no existía, lo que ubica el corte alrededor de marzo 2024. Anterior al panel de matrículas y a la dimensión geográfica; los flujos se calculan recién desde 2026-08."
+}

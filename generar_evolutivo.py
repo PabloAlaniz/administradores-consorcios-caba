@@ -235,12 +235,12 @@ def construir_flujos(snapshots, snapshots_dir=SNAPSHOTS_DIR):
     return pd.DataFrame(filas) if filas else None
 
 
-def _fmt_delta(actual, anterior, sufijo=''):
+def _fmt_delta(actual, anterior, sufijo='', vs='corte anterior'):
     if actual is None or anterior is None or pd.isna(actual) or pd.isna(anterior):
         return ''
     delta = actual - anterior
     signo = '+' if delta >= 0 else ''
-    return f' ({signo}{delta:g}{sufijo} vs mes anterior)'
+    return f' ({signo}{delta:g}{sufijo} vs {vs})'
 
 
 def generar_reporte(resumen, flujos, output_dir, nota=None):
@@ -254,7 +254,8 @@ def generar_reporte(resumen, flujos, output_dir, nota=None):
     anterior = resumen.iloc[-2] if len(resumen) > 1 else None
 
     def delta(col, sufijo=''):
-        return _fmt_delta(actual.get(col), anterior.get(col) if anterior is not None else None, sufijo)
+        return _fmt_delta(actual.get(col), anterior.get(col) if anterior is not None else None,
+                          sufijo, vs=f"corte {anterior['snapshot']}" if anterior is not None else '')
 
     lineas = [
         f"# Reporte del padrón — {actual['snapshot']}",
