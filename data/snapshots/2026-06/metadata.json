@@ -1,0 +1,8 @@
+{
+  "snapshot": "2026-06",
+  "generado": "2026-06-14T00:00:00+00:00",
+  "total_administradores": 5671,
+  "total_consorcios": 7744,
+  "fuente": "buscador-admin-consorcio.buenosaires.gob.ar",
+  "nota": "Snapshot histórico reconstruido desde data/agregados/ (corte del análisis original, publicado el 2026-06-14). Anterior a la incorporación del panel de matrículas y de la dimensión geográfica, por lo que no incluye matriculas.csv ni comuna/CP: los flujos se calculan recién desde 2026-08."
+}

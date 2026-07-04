@@ -243,8 +243,13 @@ def _fmt_delta(actual, anterior, sufijo=''):
     return f' ({signo}{delta:g}{sufijo} vs mes anterior)'
 
 
-def generar_reporte(resumen, flujos, output_dir):
-    """Escribe reporte_<ultimo-snapshot>.md con el diff narrado del último corte."""
+def generar_reporte(resumen, flujos, output_dir, nota=None):
+    """Escribe reporte_<ultimo-snapshot>.md con el diff narrado del último corte.
+
+    Si el snapshot tiene una nota metodológica en su metadata.json (p. ej. un
+    cambio observado en el endpoint), se incluye en el reporte para que la
+    advertencia viaje junto con el dato.
+    """
     actual = resumen.iloc[-1]
     anterior = resumen.iloc[-2] if len(resumen) > 1 else None
 
@@ -278,6 +283,9 @@ def generar_reporte(resumen, flujos, output_dir):
             f"- Sancionados nuevos: **{f['sancionados_nuevos']}**",
             f"- Administradores que ganaron consorcios: **{f['ganaron_consorcios']}** · que perdieron: **{f['perdieron_consorcios']}** (neto: {f['consorcios_netos']:+d})",
         ]
+
+    if nota:
+        lineas += ['', '## Nota metodológica', '', f'> {nota}']
 
     if anterior is None:
         lineas += ['', '_Primer corte disponible: las variaciones aparecerán a partir del próximo snapshot._']
@@ -313,7 +321,8 @@ def main(snapshots_dir=SNAPSHOTS_DIR, output_dir=OUTPUT_DIR):
         tabla.to_csv(path, index=False, encoding='utf-8')
         print(f'  ✓ {path} ({len(tabla)} filas)')
 
-    reporte = generar_reporte(resumen, flujos, output_dir)
+    nota = _leer_metadata(os.path.join(snapshots_dir, snapshots[-1])).get('nota')
+    reporte = generar_reporte(resumen, flujos, output_dir, nota=nota)
     print(f'  ✓ {reporte}')
 
     if len(snapshots) < 2:

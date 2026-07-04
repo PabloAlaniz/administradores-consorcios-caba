@@ -205,6 +205,14 @@ class TestEvolutivo:
         assert 'Flujos del mes (vs 2026-07)' in texto
         assert 'Altas al padrón: **1**' in texto
 
+    def test_reporte_incluye_nota_metodologica(self, snapshots_dir, tmp_path):
+        resumen = generar_evolutivo.construir_resumen(['2026-07', '2026-08'], str(snapshots_dir))
+        path = generar_evolutivo.generar_reporte(
+            resumen, None, str(tmp_path), nota='El endpoint cambió de semántica.')
+        texto = open(path, encoding='utf-8').read()
+        assert '## Nota metodológica' in texto
+        assert '> El endpoint cambió de semántica.' in texto
+
     def test_series_formato_largo(self, snapshots_dir):
         series = generar_evolutivo.construir_series(['2026-07', '2026-08'], str(snapshots_dir))
 

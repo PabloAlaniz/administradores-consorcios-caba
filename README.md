@@ -13,10 +13,15 @@ del Gobierno de la Ciudad de Buenos Aires, con un **análisis exploratorio** de 
 
 ## 📊 Análisis de datos
 
-A partir de los datos públicos se construyó un dataset de **5.671 administradores únicos**. El análisis
-completo, reproducible y narrado está en
+A partir de los datos públicos se construyó un dataset de **5.671 administradores únicos**
+(corte de **junio 2026**). El análisis completo, reproducible y narrado está en
 [`notebooks/analisis_administradores.ipynb`](notebooks/analisis_administradores.ipynb).
-Algunos hallazgos:
+
+> ⚠️ **El padrón cambió después de este análisis.** En julio 2026 el buscador oficial pasó a
+> devolver ~3.856 matrículas y cifras de consorcios muy distintas. El cambio quedó documentado,
+> tal cual se observó, en la sección [Evolutivo](#-evolutivo-snapshots-mensuales).
+
+Algunos hallazgos del corte de junio 2026:
 
 ### El mercado está muy concentrado
 
@@ -132,6 +137,37 @@ python generar_graficos_evolutivo.py             # gráficos de tendencia en doc
 **Gráficos de tendencia**: `generar_graficos_evolutivo.py` produce `docs/img/evolucion_padron.png`
 y `docs/img/evolucion_concentracion.png` a partir del resumen (con un solo snapshot son puntos;
 las líneas aparecen a medida que se acumulan cortes).
+
+### 🔍 El evolutivo en acción: el padrón cambió entre junio y julio 2026
+
+El primer corte scrapeado en vivo (julio 2026) devolvió un padrón **muy** distinto al del análisis
+original (junio 2026). Lejos de esconder la discrepancia, es exactamente el tipo de cambio que este
+sistema existe para registrar — así que ambos cortes están versionados como snapshots y el salto
+queda a la vista:
+
+| Métrica | 2026-06 | 2026-07 | Δ |
+|---|---:|---:|---:|
+| Administradores registrados | 5.671 | 3.856 | **−1.815** |
+| Consorcios administrados | 7.744 | 1.560 | **−6.184** |
+| Matrículas activas | 2.184 | 1.071 | −1.113 |
+| Máx. consorcios por administrador | 100+ | 6 | — |
+| Top 5% concentra | 67,4% | 28,8% | −38,6 pp |
+
+![Evolución del padrón](docs/img/evolucion_padron.png)
+
+**Qué puede haber pasado** (no es determinable solo desde los datos):
+
+1. **Depuración del padrón**: el GCBA dio de baja matrículas no renovadas — consistente con que
+   la obligación de renovación anual figura en los propios mensajes del buscador.
+2. **Cambio en el endpoint**: la respuesta pasó de pares *(administrador, consorcio)* a una fila
+   por administrador, y `CANTIDADCONSORCIOS` puede haber cambiado de semántica (p. ej. solo
+   consorcios con declaración vigente).
+
+Probablemente sea una combinación de ambas. La política del repo es **documentar lo observado tal
+cual**: cada snapshot lleva su `nota` metodológica en `metadata.json`, que se propaga
+automáticamente al reporte mensual ([`reporte_2026-07.md`](data/evolutivo/reporte_2026-07.md)).
+Los próximos cortes mensuales van a mostrar si los números se estabilizan en el nuevo nivel
+(depuración) o siguen moviéndose (cambio de semántica).
 
 La captura mensual está automatizada con **GitHub Actions**
 ([`.github/workflows/snapshot-mensual.yml`](.github/workflows/snapshot-mensual.yml)): el día 1 de
