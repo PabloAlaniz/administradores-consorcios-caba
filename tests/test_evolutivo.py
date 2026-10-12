@@ -92,11 +92,63 @@ class TestPanelMatriculas:
 
     def test_hash_estable_y_sin_pii(self, df_crudo):
         df = df_crudo.drop_duplicates('MATRICULAID')
-        panel1 = generar_agregados.panel_matriculas(df)
-        panel2 = generar_agregados.panel_matriculas(df)
+        panel1 = generar_agregados.panel_matriculas(df, 'clave')
+        panel2 = generar_agregados.panel_matriculas(df, 'clave')
         assert list(panel1['matricula_hash']) == list(panel2['matricula_hash'])
         assert panel1['matricula_hash'].nunique() == 3
-        assert set(panel1.columns) == {'matricula_hash', 'estado', 'cantidad_consorcios', 'tiene_sanciones'}
+        assert set(panel1.columns) == {
+            'matricula_hash', 'estado', 'cantidad_consorcios', 'tiene_sanciones', 'anio_alta'}
+        assert list(panel1['anio_alta']) == [2018, 2020, 2003]
+
+    def test_hash_depende_de_la_clave(self, df_crudo):
+        df = df_crudo.drop_duplicates('MATRICULAID')
+        a = generar_agregados.panel_matriculas(df, 'clave-a')['matricula_hash']
+        b = generar_agregados.panel_matriculas(df, 'clave-b')['matricula_hash']
+        assert not set(a) & set(b)
+
+    def test_hash_no_es_sha256_sin_clave(self):
+        import hashlib
+        sin_clave = hashlib.sha256(b'3502').hexdigest()[:16]
+        assert generar_agregados.hash_matricula(3502, 'clave') != sin_clave
+
+    def test_snapshot_sin_clave_falla(self, df_crudo, tmp_path, monkeypatch):
+        monkeypatch.delenv('PANEL_HMAC_KEY')
+        df = df_crudo.drop_duplicates('MATRICULAID')
+        agregados = generar_agregados.generar_agregados(df)
+        with pytest.raises(SystemExit, match='PANEL_HMAC_KEY'):
+            generar_agregados.escribir_snapshot(agregados, df, '2026-07', snapshots_dir=str(tmp_path))
+
+
+class TestAgregadosNuevos:
+
+    @pytest.fixture
+    def df(self):
+        return pd.DataFrame({
+            'MATRICULAID': [1, 2, 3, 4],
+            'FECHAACTUALIZACION': ['2026-04-10', '2026-04-30', '2026-05-04', '1900-01-01'],
+            'DISPOSICION': [' DI-2025-1123-GCABA-DGDYPC, DI-2026-1229-GCABA-DGDYPC',
+                            ' DI-2025-1123-GCABA-DGDYPC', None, ''],
+            'BARRIOUSIGADMINISTRADOR': ['Palermo', 'PALERMO ', None, 'Caballito'],
+        })
+
+    def test_actualizaciones_por_mes_ignora_fecha_nula(self, df):
+        tabla = generar_agregados.actualizaciones_por_mes(df)
+        assert dict(zip(tabla['mes'], tabla['matriculas'])) == {'2026-04': 2, '2026-05': 1}
+
+    def test_ultima_actualizacion(self, df):
+        assert generar_agregados.ultima_actualizacion(df) == '2026-05-04'
+
+    def test_disposiciones_por_anio_cuenta_unicas(self, df):
+        tabla = generar_agregados.disposiciones_por_anio(df)
+        assert dict(zip(tabla['anio'], tabla['disposiciones'])) == {2025: 1, 2026: 1}
+
+    def test_disposiciones_por_administrador(self, df):
+        tabla = generar_agregados.disposiciones_por_administrador(df)
+        assert dict(zip(tabla['disposiciones'], tabla['administradores'])) == {'1': 1, '2': 1}
+
+    def test_barrio_normaliza(self, df):
+        tabla = generar_agregados.barrio_administrador(df)
+        assert dict(zip(tabla['barrio'], tabla['cantidad'])) == {'PALERMO': 2, 'CABALLITO': 1, 'Sin dato': 1}
 
 
 class TestIndicesConcentracion:
@@ -187,6 +239,32 @@ class TestEvolutivo:
         assert f['sancionados_nuevos'] == 1  # matrícula 1
         assert f['perdieron_consorcios'] == 1 and f['ganaron_consorcios'] == 0
         assert f['consorcios_netos'] == -1
+
+    def test_flujos_marcan_meses_entre_cortes(self, snapshots_dir):
+        flujos = generar_evolutivo.construir_flujos(['2026-07', '2026-08'], str(snapshots_dir))
+        assert flujos.iloc[0]['meses_entre_cortes'] == 1
+
+    def test_meses_entre(self):
+        assert generar_evolutivo.meses_entre('2026-07', '2026-09') == 2
+        assert generar_evolutivo.meses_entre('2025-12', '2026-01') == 1
+
+    def test_reporte_avisa_hueco_entre_cortes(self, snapshots_dir, tmp_path):
+        resumen = generar_evolutivo.construir_resumen(['2026-07', '2026-08'], str(snapshots_dir))
+        flujos = generar_evolutivo.construir_flujos(['2026-07', '2026-08'], str(snapshots_dir))
+        flujos['meses_entre_cortes'] = 2
+        texto = open(generar_evolutivo.generar_reporte(resumen, flujos, str(tmp_path)), encoding='utf-8').read()
+        assert 'Flujos de los últimos 2 meses (vs 2026-07)' in texto
+
+    def test_reporte_renovaciones_y_cobertura(self, snapshots_dir, tmp_path):
+        resumen = generar_evolutivo.construir_resumen(['2026-07', '2026-08'], str(snapshots_dir))
+        resumen['ultima_actualizacion_padron'] = '2026-05-04'
+        resumen['datos_abiertos_fecha_corte'] = '2026-02-25'
+        resumen['datos_abiertos_total'] = 100
+        resumen['cobertura_solo_datos_abiertos'] = 55
+        texto = open(generar_evolutivo.generar_reporte(resumen, None, str(tmp_path)), encoding='utf-8').read()
+        assert 'Última renovación registrada en el padrón: **2026-05-04**' in texto
+        assert 'No se registraron renovaciones nuevas desde el corte 2026-07' in texto
+        assert '**100** administradores activos; **55** (55%) no aparecen en el buscador' in texto
 
     def test_flujos_sin_panel_devuelve_none(self, snapshots_dir):
         (snapshots_dir / '2026-07' / 'matriculas.csv').unlink()

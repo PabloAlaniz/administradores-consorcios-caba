@@ -1,7 +1,6 @@
 requests==2.31.0
 beautifulsoup4==4.12.3
 pandas==2.2.0
-pytest==8.0.0
 
 # Análisis y notebooks
 matplotlib==3.8.3

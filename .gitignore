@@ -33,3 +33,5 @@ htmlcov/
 !data/agregados/*.csv
 !data/snapshots/*/*.csv
 !data/evolutivo/*.csv
+# Registro oficial descargado de BA Data (trae nombres y correos)
+registro_oficial.csv

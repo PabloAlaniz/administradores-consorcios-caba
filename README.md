@@ -1,6 +1,6 @@
 # 🏢 Administradores de Consorcios de CABA — Scraper & Análisis de datos
 
-[![CI](https://github.com/PabloAlaniz/Administradores-Consorcios/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloAlaniz/Administradores-Consorcios/actions/workflows/ci.yml)
+[![CI](https://github.com/PabloAlaniz/administradores-consorcios-caba/actions/workflows/ci.yml/badge.svg)](https://github.com/PabloAlaniz/administradores-consorcios-caba/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -19,9 +19,11 @@ A partir de los datos públicos se construyó un dataset de **3.856 administrado
 completo, sin paginación, estable entre requests). El análisis completo, reproducible y narrado
 está en [`notebooks/analisis_administradores.ipynb`](notebooks/analisis_administradores.ipynb).
 
-> 📉 **El padrón se achicó un tercio desde 2024.** El análisis original (corte ~marzo 2024)
-> registraba 5.671 administradores. La historia completa del cambio, con hipótesis y evidencia,
-> está en la sección [Evolutivo](#-evolutivo-snapshots-mensuales).
+> ⚠️ **El buscador muestra menos de la mitad del registro.** El CSV que el propio GCBA publica en
+> BA Data (corte 25/02/2026) lista **8.505 administradores activos**; el buscador devuelve 3.823, y
+> **4.683 matrículas del CSV oficial no aparecen en él** (entre ellas todas las ≥ 20.000 y las altas
+> de 2026). Los números de abajo describen *lo que muestra el buscador*, no el universo del registro.
+> Ver [Cobertura del buscador](#-cobertura-del-buscador).
 
 Algunos hallazgos del corte de julio 2026:
 
@@ -41,7 +43,8 @@ cambió de semántica — está documentado en el evolutivo.
 ![Altas por año](docs/img/altas_por_anio.png)
 
 Las altas se aceleran desde **2021** y tocan su máximo en **2024** (595). En 2025 se frenan (237)
-y **2026 aún no registra altas** pese a que el padrón tiene actualizaciones hasta mayo 2026.
+y **el buscador no muestra altas de 2026**, aunque el CSV oficial de BA Data registra 50 en los
+primeros dos meses del año (ver [Cobertura](#-cobertura-del-buscador)).
 Ojo con el sesgo de supervivencia: las cohortes viejas están subrepresentadas porque el corte
 actual ya no incluye a quienes salieron del padrón.
 
@@ -63,8 +66,8 @@ género con leve mayoría femenina** (estimado por prefijo de CUIT; en 2024 la m
 
 ```bash
 # 1. Clonar e instalar
-git clone https://github.com/PabloAlaniz/Administradores-Consorcios.git
-cd Administradores-Consorcios
+git clone https://github.com/PabloAlaniz/administradores-consorcios-caba.git
+cd administradores-consorcios-caba
 python3 -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
@@ -75,10 +78,14 @@ jupyter notebook notebooks/analisis_administradores.ipynb
 Para **regenerar la data desde cero**:
 
 ```bash
+export PANEL_HMAC_KEY=...                 # clave del seudónimo del panel (en CI es un secret)
 python administradores_scraper.py         # 1. scrapea  -> administradores.csv (local, gitignored)
-python generar_agregados.py --snapshot    # 2. anonimiza -> data/agregados/ + snapshot del mes
-python generar_evolutivo.py               # 3. consolida los snapshots -> data/evolutivo/
-python generar_graficos_evolutivo.py      # 4. gráficos de tendencia -> docs/img/evolucion_*.png
+python datos_abiertos.py                  # 2. registro oficial de BA Data -> registro_oficial.csv (gitignored)
+python generar_agregados.py --snapshot --datos-abiertos registro_oficial.csv
+                                          # 3. anonimiza -> data/agregados/ + snapshot del mes
+python validar_snapshot.py 2026-11        # 4. control de calidad contra el corte anterior
+python generar_evolutivo.py               # 5. consolida los snapshots -> data/evolutivo/
+python generar_graficos_evolutivo.py      # 6. gráficos de tendencia -> docs/img/evolucion_*.png
 ```
 
 ---
@@ -123,9 +130,14 @@ python generar_graficos_evolutivo.py             # gráficos de tendencia en doc
 - Dimensión **geográfica**: administradores por comuna (USIG) y por código postal del domicilio
   del administrador. La comuna todavía tiene poca cobertura en el padrón oficial; el CP cubre ~94%,
   y el evolutivo permite ver cómo mejora esa cobertura con el tiempo.
-- `matriculas.csv`: un **panel pseudonimizado** (matrícula hasheada + estado + cantidad de
-  consorcios + sanciones — todos atributos ya públicos en el buscador oficial; nunca nombre,
-  CUIT ni domicilio). Es lo que permite calcular flujos reales entre meses.
+- `matriculas.csv`: un **panel seudonimizado** (HMAC de la matrícula con clave secreta + estado +
+  cantidad de consorcios + sanciones + año de alta — todos atributos ya públicos en el buscador
+  oficial; nunca nombre, CUIT ni domicilio). Es lo que permite calcular flujos reales entre meses.
+- Calendario de renovaciones (`actualizaciones_por_mes.csv` y la última renovación registrada en
+  `metadata.json`), sanciones por número de disposición (`disposiciones_por_anio.csv`,
+  `disposiciones_por_administrador.csv`) y administradores por barrio.
+- Si se pasa `--datos-abiertos`, la cobertura contra el CSV oficial de BA Data
+  (`cobertura_por_tramo.csv`, `cobertura_por_anio_alta.csv`).
 
 **Qué produce el evolutivo** (`data/evolutivo/`):
 
@@ -133,7 +145,8 @@ python generar_graficos_evolutivo.py             # gráficos de tendencia en doc
   matrículas activas, concentración del top 1/5/10%, **índices de Gini y HHI**, sanciones…) y su
   **variación contra el mes anterior** (`var_*`). Gini y HHI se calculan desde la distribución
   agregada, así que funcionan retroactivamente para todos los snapshots.
-- `flujos.csv` — movimientos **brutos** entre cortes consecutivos: altas y bajas del padrón,
+- `flujos.csv` — movimientos **brutos** entre cortes consecutivos (con `meses_entre_cortes`, para
+  no leer como mensual un salto de dos meses si falta un snapshot): altas y bajas del padrón,
   matrículas que se activaron o desactivaron, sancionados nuevos y administradores que ganaron
   o perdieron consorcios. Un +20 neto puede ser 25 altas y 5 bajas: esto lo hace visible.
 - `evolucion_*.csv` — cada dimensión categórica (estado, tipo de persona, comuna, CP…) en formato
@@ -186,10 +199,36 @@ metodológica en `metadata.json`, que se propaga automáticamente al reporte men
 ([`reporte_2026-07.md`](data/evolutivo/reporte_2026-07.md)). Los próximos cortes mensuales van a
 mostrar si los números se estabilizan en el nuevo nivel o siguen moviéndose.
 
+### 🔎 Cobertura del buscador
+
+En octubre de 2026 cruzamos el buscador con el CSV del registro que el GCBA publica en
+[BA Data](https://data.buenosaires.gob.ar/) ("activos" al 25/02/2026), matrícula por matrícula:
+
+| Tramo de matrícula | En ambos | Solo en BA Data |
+|---|---:|---:|
+| 1–4.999 | 73 | 1.160 |
+| 5.000–9.999 | 314 | 1.185 |
+| 10.000–14.999 | 865 | 1.288 |
+| 15.000–19.999 | 2.570 | 665 |
+| 20.000+ | 0 | 385 |
+
+El buscador es casi un subconjunto exacto del CSV oficial (solo 1 matrícula está en el buscador y
+no en el CSV), pero le faltan 4.683. Las ausencias se concentran en las matrículas viejas, en las
+≥ 20.000 (el buscador oficial avisa que todavía no las muestra) y en las altas de 2026. No sabemos
+qué criterio usa el buscador para excluirlas. Esto obliga a releer la caída 2024 → 2026: puede
+ser una depuración del registro, un recorte de lo que el buscador expone, o ambas cosas.
+
+Además, la última renovación registrada en el buscador es del **4/05/2026**: desde entonces no
+entran renovaciones, y las matrículas activas se van venciendo sin reemplazo (1.071 → 583 entre
+julio y octubre, con 0 reactivaciones). Cada reporte mensual incluye ahora una sección de
+*renovaciones procesadas* y otra de *cobertura*.
+
 La captura mensual está automatizada con **GitHub Actions**
 ([`.github/workflows/snapshot-mensual.yml`](.github/workflows/snapshot-mensual.yml)): el día 1 de
-cada mes scrapea el padrón, genera el snapshot y commitea solo los agregados sin PII (el CSV crudo
-vive únicamente en el runner efímero y se descarta). También se puede disparar a mano desde la
+cada mes scrapea el padrón, genera el snapshot, lo **valida contra el corte anterior**
+(`validar_snapshot.py`: si faltan archivos o el total varía más de ±15%, no commitea y abre un
+issue) y commitea solo los agregados sin PII (el CSV crudo vive únicamente en el runner efímero y
+se descarta). Si el día 1 falla, el día 2 reintenta. También se puede disparar a mano desde la
 pestaña *Actions* (`workflow_dispatch`).
 
 ---
@@ -197,12 +236,14 @@ pestaña *Actions* (`workflow_dispatch`).
 ## 🛠️ Estructura del proyecto
 
 ```
-Administradores-Consorcios/
+administradores-consorcios-caba/
 ├── administradores_scraper.py   # Scraper modular (recomendado)
-├── main.py                      # Versión monolítica original (legacy)
 ├── generar_agregados.py         # Anonimiza y agrega el CSV crudo (--snapshot para corte mensual)
 ├── generar_evolutivo.py         # Series de tiempo, flujos, Gini/HHI y reporte mensual
 ├── generar_graficos_evolutivo.py # Gráficos de tendencia desde el evolutivo
+├── datos_abiertos.py            # Descarga y reconcilia el CSV oficial de BA Data
+├── validar_snapshot.py          # Control de calidad del snapshot antes de commitear
+├── migrar_panel_hmac.py         # Migración única de los paneles al seudónimo con HMAC
 ├── notebooks/
 │   └── analisis_administradores.ipynb
 ├── data/
@@ -240,11 +281,11 @@ repetida; `generar_agregados.py` deduplica por `MATRICULAID`.
 
 ```bash
 pytest                              # corre los tests
-pytest --cov=. --cov-report=html    # con coverage
 ```
 
-El repo tiene **CI en GitHub Actions** (`.github/workflows/ci.yml`) que ejecuta linting con `ruff` y la
-suite de `pytest` en cada push.
+El repo tiene **CI en GitHub Actions** (`.github/workflows/ci.yml`) que ejecuta `ruff` y `pytest`
+con Python 3.11 y 3.12 en cada push y PR; cualquiera de los dos que falle rompe el build.
+Dependencias de desarrollo en `requirements-dev.txt`.
 
 ---
 
@@ -257,7 +298,12 @@ suite de `pytest` en cada push.
 - Solo se versionan **agregados estadísticos anonimizados** (`data/agregados/`), de los que es imposible
   reconstruir individuos.
 - Campos de contacto (teléfono, email) y documento **no son expuestos por el endpoint público**, por lo
-  que no forman parte del análisis.
+  que no forman parte del análisis. El CSV oficial de BA Data sí trae nombre y correo: se usan solo la
+  matrícula y la fecha de inscripción, y el archivo nunca se versiona.
+- El panel de matrículas usa un **HMAC con clave secreta** (secret `PANEL_HMAC_KEY` del repo). Hasta
+  octubre de 2026 era un SHA-256 sin clave, reversible por fuerza bruta porque las matrículas son
+  números chicos y secuenciales; los paneles se migraron con `migrar_panel_hmac.py`, pero los hashes
+  viejos siguen en el historial de git.
 
 **Uso educativo y de análisis de datos públicos.** No hacer scraping masivo que afecte el servicio del GCBA.
 

@@ -39,7 +39,19 @@ DIMENSIONES = {
     'distribucion_consorcios': ('cantidad_consorcios', 'administradores'),
     'comuna_administrador': ('comuna', 'cantidad'),
     'cp_administrador': ('codigo_postal', 'cantidad'),
+    'barrio_administrador': ('barrio', 'cantidad'),
+    'actualizaciones_por_mes': ('mes', 'matriculas'),
+    'disposiciones_por_anio': ('anio', 'disposiciones'),
 }
+
+# Campos de metadata.json que se copian tal cual al resumen (pueden faltar
+# en snapshots viejos).
+CAMPOS_METADATA = [
+    'ultima_actualizacion_padron',
+    'datos_abiertos_fecha_corte',
+    'datos_abiertos_total',
+    'cobertura_solo_datos_abiertos',
+]
 
 
 def listar_snapshots(snapshots_dir=SNAPSHOTS_DIR):
@@ -153,6 +165,7 @@ def resumen_snapshot(snapshot, snapshot_dir):
         'pct_top_10': _pct_top(concentracion, 0.10),
         'gini': gini_desde_distribucion(distribucion),
         'hhi': hhi_desde_distribucion(distribucion),
+        **{campo: meta.get(campo) for campo in CAMPOS_METADATA},
     }
     if total_admins:
         if sancionados is not None:
@@ -196,6 +209,13 @@ def _leer_panel(snapshots_dir, snapshot):
     return df.set_index('matricula_hash')
 
 
+def meses_entre(anterior, actual):
+    """Meses calendario entre dos snapshots YYYY-MM (1 = consecutivos)."""
+    a_anio, a_mes = map(int, anterior.split('-'))
+    b_anio, b_mes = map(int, actual.split('-'))
+    return (b_anio - a_anio) * 12 + (b_mes - a_mes)
+
+
 def flujos_entre(panel_ant, panel_act):
     """Flujos brutos entre dos paneles consecutivos de matrículas."""
     ant, act = set(panel_ant.index), set(panel_act.index)
@@ -231,6 +251,7 @@ def construir_flujos(snapshots, snapshots_dir=SNAPSHOTS_DIR):
         if panel_ant is None or panel_act is None:
             continue
         filas.append({'snapshot': actual, 'vs_snapshot': anterior,
+                      'meses_entre_cortes': meses_entre(anterior, actual),
                       **flujos_entre(panel_ant, panel_act)})
     return pd.DataFrame(filas) if filas else None
 
@@ -241,6 +262,40 @@ def _fmt_delta(actual, anterior, sufijo='', vs='corte anterior'):
     delta = actual - anterior
     signo = '+' if delta >= 0 else ''
     return f' ({signo}{delta:g}{sufijo} vs {vs})'
+
+
+def _presente(fila, campo):
+    return fila is not None and campo in fila and not pd.isna(fila[campo])
+
+
+def _seccion_frescura(actual, anterior):
+    """Hasta cuándo el GCBA procesó renovaciones, y si se movió desde el corte anterior."""
+    if not _presente(actual, 'ultima_actualizacion_padron'):
+        return []
+    ultima = actual['ultima_actualizacion_padron']
+    lineas = ['', '## Renovaciones procesadas', '',
+              f'- Última renovación registrada en el padrón: **{ultima}**']
+    if _presente(anterior, 'ultima_actualizacion_padron') and anterior['ultima_actualizacion_padron'] == ultima:
+        lineas.append(
+            f"- No se registraron renovaciones nuevas desde el corte {anterior['snapshot']}. "
+            'Las matrículas que dejan de estar activas en este período lo hacen sin '
+            'renovaciones nuevas que las compensen.'
+        )
+    return lineas
+
+
+def _seccion_cobertura(actual):
+    """Cuánto del registro publicado en BA Data devuelve el buscador."""
+    if not _presente(actual, 'datos_abiertos_total'):
+        return []
+    total = int(actual['datos_abiertos_total'])
+    faltan = int(actual['cobertura_solo_datos_abiertos'])
+    return [
+        '', '## Cobertura del buscador', '',
+        f"- El registro publicado en BA Data (corte {actual['datos_abiertos_fecha_corte']}) lista "
+        f'**{total}** administradores activos; **{faltan}** ({faltan / total:.0%}) no aparecen en el buscador.',
+        '- Ver `cobertura_por_tramo.csv` y `cobertura_por_anio_alta.csv` del snapshot.',
+    ]
 
 
 def generar_reporte(resumen, flujos, output_dir, nota=None):
@@ -275,15 +330,20 @@ def generar_reporte(resumen, flujos, output_dir, nota=None):
 
     if flujos is not None and flujos.iloc[-1]['snapshot'] == actual['snapshot']:
         f = flujos.iloc[-1]
+        meses = int(f.get('meses_entre_cortes', 1) or 1)
+        titulo = 'Flujos del mes' if meses == 1 else f'Flujos de los últimos {meses} meses'
         lineas += [
             '',
-            f"## Flujos del mes (vs {f['vs_snapshot']})",
+            f"## {titulo} (vs {f['vs_snapshot']})",
             '',
             f"- Altas al padrón: **{f['altas']}** · Bajas: **{f['bajas']}**",
             f"- Matrículas que se activaron: **{f['activaciones']}** · que dejaron de estar activas: **{f['desactivaciones']}**",
             f"- Sancionados nuevos: **{f['sancionados_nuevos']}**",
             f"- Administradores que ganaron consorcios: **{f['ganaron_consorcios']}** · que perdieron: **{f['perdieron_consorcios']}** (neto: {f['consorcios_netos']:+d})",
         ]
+
+    lineas += _seccion_frescura(actual, anterior)
+    lineas += _seccion_cobertura(actual)
 
     if nota:
         lineas += ['', '## Nota metodológica', '', f'> {nota}']
