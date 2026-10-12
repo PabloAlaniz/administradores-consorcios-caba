@@ -1,11 +1,13 @@
 name: Snapshot mensual
 
-# Corre el día 1 de cada mes: scrapea el padrón, genera los agregados
-# anonimizados, guarda el snapshot fechado y actualiza el evolutivo.
-# El CSV crudo (con PII) vive solo en el runner efímero y nunca se commitea.
+# Corre el día 1 de cada mes (y reintenta el día 2 si el 1 no dejó snapshot):
+# scrapea el padrón, genera los agregados anonimizados, los valida contra el
+# corte anterior y recién entonces commitea. El CSV crudo (con PII) vive solo
+# en el runner efímero: no se commitea ni se sube como artifact, porque los
+# artifacts de un repo público los puede descargar cualquiera.
 on:
   schedule:
-    - cron: '0 9 1 * *'
+    - cron: '0 9 1,2 * *'
   workflow_dispatch:
     inputs:
       snapshot:
@@ -15,41 +17,72 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   snapshot:
     runs-on: ubuntu-latest
+    env:
+      PANEL_HMAC_KEY: ${{ secrets.PANEL_HMAC_KEY }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Definir snapshot
+        id: snap
+        run: |
+          SNAPSHOT="${{ github.event.inputs.snapshot }}"
+          [ -z "$SNAPSHOT" ] && SNAPSHOT=$(date -u +%Y-%m)
+          echo "snapshot=$SNAPSHOT" >> "$GITHUB_OUTPUT"
+          # El cron del día 2 es solo un reintento: si el día 1 ya dejó el
+          # snapshot, no hay nada que hacer.
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -f "data/snapshots/$SNAPSHOT/metadata.json" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "El snapshot $SNAPSHOT ya existe: nada que hacer."
+          fi
+
       - name: Set up Python
+        if: steps.snap.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
+        if: steps.snap.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Scrapear padrón
+        if: steps.snap.outputs.skip != 'true'
         run: python administradores_scraper.py
 
+      - name: Descargar registro oficial (BA Data)
+        if: steps.snap.outputs.skip != 'true'
+        # Si el portal está caído, el snapshot sale igual, sin la cobertura.
+        continue-on-error: true
+        run: python datos_abiertos.py --salida registro_oficial.csv
+
       - name: Generar agregados + snapshot
+        if: steps.snap.outputs.skip != 'true'
         run: |
-          if [ -n "${{ github.event.inputs.snapshot }}" ]; then
-            python generar_agregados.py --snapshot "${{ github.event.inputs.snapshot }}"
-          else
-            python generar_agregados.py --snapshot
-          fi
+          EXTRA=""
+          [ -f registro_oficial.csv ] && EXTRA="--datos-abiertos registro_oficial.csv"
+          python generar_agregados.py --snapshot "${{ steps.snap.outputs.snapshot }}" $EXTRA
 
-      - name: Generar evolutivo
-        run: python generar_evolutivo.py
+      - name: Validar snapshot
+        if: steps.snap.outputs.skip != 'true'
+        run: |
+          set -o pipefail
+          python validar_snapshot.py "${{ steps.snap.outputs.snapshot }}" | tee validacion.txt
 
-      - name: Generar gráficos evolutivos
-        run: python generar_graficos_evolutivo.py
+      - name: Generar evolutivo y gráficos
+        if: steps.snap.outputs.skip != 'true'
+        run: |
+          python generar_evolutivo.py
+          python generar_graficos_evolutivo.py
 
       - name: Commit y push de la data (solo agregados, sin PII)
+        if: steps.snap.outputs.skip != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -58,7 +91,23 @@ jobs:
             echo "Sin cambios en la data: no se commitea nada."
             exit 0
           fi
-          SNAPSHOT="${{ github.event.inputs.snapshot }}"
-          [ -z "$SNAPSHOT" ] && SNAPSHOT=$(date -u +%Y-%m)
-          git commit -m "data: snapshot mensual $SNAPSHOT"
+          git commit -m "data: snapshot mensual ${{ steps.snap.outputs.snapshot }}"
           git push
+
+      - name: Abrir issue si el snapshot falló
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "El workflow de snapshot mensual falló y **no commiteó** el corte ${{ steps.snap.outputs.snapshot }}."
+            echo
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            if [ -f validacion.txt ]; then
+              echo
+              echo '```'
+              cat validacion.txt
+              echo '```'
+            fi
+          } > issue.md
+          gh issue create --title "Snapshot ${{ steps.snap.outputs.snapshot }} falló" --body-file issue.md

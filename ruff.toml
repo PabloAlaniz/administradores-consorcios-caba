@@ -1,0 +1,7 @@
+line-length = 120
+extend-exclude = ["notebooks"]
+
+[lint]
+select = ["E", "F", "W", "I"]
+# Las líneas del reporte narrado son f-strings largos a propósito.
+ignore = ["E501"]

@@ -14,15 +14,22 @@ Uso:
     python generar_agregados.py [ruta_csv]              # default: administradores.csv
     python generar_agregados.py --snapshot              # + snapshot del mes actual
     python generar_agregados.py --snapshot 2026-07      # + snapshot con fecha explícita
+    python generar_agregados.py --snapshot --datos-abiertos registro_oficial.csv
+                                                        # + cobertura vs BA Data
+
+Generar un snapshot requiere la variable de entorno PANEL_HMAC_KEY.
 """
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import re
 from datetime import date, datetime, timezone
 
 import pandas as pd
+
+import datos_abiertos
 
 # Columnas con datos personales que NUNCA deben salir en los agregados.
 PII_COLS = [
@@ -31,6 +38,10 @@ PII_COLS = [
     'PISOADMINISTRADOR', 'DEPARTAMENTOADMINISTRADOR', 'DOMICILIO',
     'DOMICILIOADMINISTRADOR',
 ]
+
+# Clave del HMAC que seudonimiza las matrículas del panel. Vive como secret
+# de GitHub; sin ella no se puede generar un snapshot (ver panel_matriculas).
+ENV_CLAVE_PANEL = 'PANEL_HMAC_KEY'
 
 OUTPUT_DIR = os.path.join('data', 'agregados')
 SNAPSHOTS_DIR = os.path.join('data', 'snapshots')
@@ -150,23 +161,95 @@ def cp_administrador(df):
     return out.reset_index(name='cantidad').sort_values('codigo_postal').reset_index(drop=True)
 
 
-def panel_matriculas(df):
-    """Panel pseudonimizado, una fila por matrícula, para calcular flujos entre cortes.
+def barrio_administrador(df):
+    """Administradores por barrio (USIG) del domicilio del administrador."""
+    if 'BARRIOUSIGADMINISTRADOR' not in df.columns:
+        return None
+    barrio = (df['BARRIOUSIGADMINISTRADOR'].fillna('').astype(str).str.strip().str.upper()
+              .replace('', 'Sin dato'))
+    out = barrio.value_counts(dropna=False).rename_axis('barrio')
+    return out.reset_index(name='cantidad')
 
-    La matrícula se publica hasheada (SHA-256 truncado). El número de matrícula
-    ya es público en el buscador oficial, y acá solo se exponen atributos que
-    también son públicos (estado, cantidad de consorcios, sanciones) — nunca
-    nombre, CUIT ni domicilio. El hash es estable entre snapshots, que es lo
-    que permite calcular altas, bajas y transiciones de estado.
+
+def actualizaciones_por_mes(df):
+    """Matrículas según el mes de su última actualización (renovación de la DDJJ).
+
+    Muestra hasta cuándo el GCBA viene procesando renovaciones: si el último
+    mes con actualizaciones queda quieto corte tras corte, las matrículas
+    activas se van venciendo sin reemplazo.
     """
-    hashes = df['MATRICULAID'].astype(str).map(
-        lambda m: hashlib.sha256(m.encode('utf-8')).hexdigest()[:16]
-    )
+    if 'FECHAACTUALIZACION' not in df.columns:
+        return None
+    fechas = pd.to_datetime(df['FECHAACTUALIZACION'], errors='coerce')
+    fechas = fechas[fechas.dt.year >= 2000]  # el padrón usa 1900-01-01 como "sin dato"
+    out = (fechas.dt.to_period('M').astype(str).value_counts().sort_index()
+           .rename_axis('mes').reset_index(name='matriculas'))
+    return out
+
+
+def _disposiciones(df):
+    """Serie de listas de disposiciones (DI-AAAA-NNNN-GCABA-DGDYPC) por matrícula."""
+    return (df['DISPOSICION'].fillna('').astype(str)
+            .str.findall(r'DI-\d{4}-\d+-GCABA-[A-Z]+'))
+
+
+def disposiciones_por_anio(df):
+    """Disposiciones sancionatorias únicas por año de emisión."""
+    if 'DISPOSICION' not in df.columns:
+        return None
+    unicas = pd.Series(sorted({d for lista in _disposiciones(df) for d in lista}), dtype=str)
+    if unicas.empty:
+        return pd.DataFrame({'anio': pd.Series(dtype='Int64'), 'disposiciones': pd.Series(dtype=int)})
+    anios = unicas.str.extract(r'DI-(\d{4})-', expand=False).astype(int)
+    return anios.value_counts().sort_index().rename_axis('anio').reset_index(name='disposiciones')
+
+
+def disposiciones_por_administrador(df):
+    """Cuántos sancionados tienen 1, 2, 3+ disposiciones vigentes en el buscador."""
+    if 'DISPOSICION' not in df.columns:
+        return None
+    cantidad = _disposiciones(df).str.len()
+    cantidad = cantidad[cantidad > 0].clip(upper=3)
+    etiqueta = cantidad.map({1: '1', 2: '2', 3: '3+'})
+    out = etiqueta.value_counts().sort_index().rename_axis('disposiciones').reset_index(name='administradores')
+    return out
+
+
+def hash_matricula(matricula, clave):
+    """Seudónimo estable de una matrícula: HMAC-SHA256 truncado.
+
+    Con un hash sin clave, las matrículas (enteros chicos y secuenciales) se
+    recuperan por fuerza bruta en milisegundos. El HMAC con clave secreta lo
+    impide mientras la clave no se publique.
+    """
+    return hmac.new(clave.encode('utf-8'), str(matricula).encode('utf-8'), hashlib.sha256).hexdigest()[:16]
+
+
+def clave_panel():
+    clave = os.environ.get(ENV_CLAVE_PANEL, '')
+    if not clave:
+        raise SystemExit(
+            f'ERROR: falta la variable de entorno {ENV_CLAVE_PANEL} (clave del HMAC del panel). '
+            'En CI es un secret del repo; localmente exportala antes de generar un snapshot.'
+        )
+    return clave
+
+
+def panel_matriculas(df, clave):
+    """Panel seudonimizado, una fila por matrícula, para calcular flujos entre cortes.
+
+    La matrícula se publica como HMAC (ver `hash_matricula`). Solo se exponen
+    atributos que ya son públicos en el buscador oficial (estado, cantidad de
+    consorcios, sanciones, año de alta) — nunca nombre, CUIT ni domicilio. El
+    seudónimo es estable entre snapshots, que es lo que permite calcular
+    altas, bajas y transiciones de estado.
+    """
     return pd.DataFrame({
-        'matricula_hash': hashes,
+        'matricula_hash': df['MATRICULAID'].map(lambda m: hash_matricula(m, clave)),
         'estado': df['ESTADOMATRICULADESC'].astype(str).str.strip(),
         'cantidad_consorcios': df['CANTIDADCONSORCIOS'].astype(int),
         'tiene_sanciones': _normalizar_si_no(df['TIENESANCIONES']),
+        'anio_alta': pd.to_datetime(df['FECHAALTA'], errors='coerce').dt.year.astype('Int64'),
     }).reset_index(drop=True)
 
 
@@ -192,6 +275,11 @@ def generar_agregados(df):
         # Geográficos: pueden faltar en CSVs crudos viejos sin esas columnas.
         'comuna_administrador': comuna_administrador(df),
         'cp_administrador': cp_administrador(df),
+        'barrio_administrador': barrio_administrador(df),
+        # Calendario de renovaciones y sanciones con número de disposición.
+        'actualizaciones_por_mes': actualizaciones_por_mes(df),
+        'disposiciones_por_anio': disposiciones_por_anio(df),
+        'disposiciones_por_administrador': disposiciones_por_administrador(df),
     }
     return {nombre: tabla for nombre, tabla in agregados.items() if tabla is not None}
 
@@ -206,7 +294,16 @@ def escribir_agregados(agregados, output_dir):
         print(f'  ✓ {path} ({len(tabla)} filas)')
 
 
-def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR):
+def ultima_actualizacion(df):
+    """Fecha (ISO) de la renovación más reciente registrada en el padrón, o None."""
+    if 'FECHAACTUALIZACION' not in df.columns:
+        return None
+    fecha = pd.to_datetime(df['FECHAACTUALIZACION'], errors='coerce').max()
+    return None if pd.isna(fecha) else fecha.date().isoformat()
+
+
+def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR, clave=None,
+                      metadata_extra=None):
     """Guarda una copia fechada de los agregados en `data/snapshots/<snapshot>/`.
 
     Además escribe un `metadata.json` con los totales del corte, que usa
@@ -215,12 +312,13 @@ def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR):
     if not re.fullmatch(r'\d{4}-\d{2}', snapshot):
         raise SystemExit(f"ERROR: snapshot inválido '{snapshot}' (formato esperado: YYYY-MM)")
 
+    clave = clave or clave_panel()
     snapshot_dir = os.path.join(snapshots_dir, snapshot)
     escribir_agregados(agregados, snapshot_dir)
 
     # El panel pseudonimizado va solo en el snapshot (es propio de cada corte):
     # es lo que permite calcular flujos (altas/bajas/transiciones) entre meses.
-    panel = panel_matriculas(df)
+    panel = panel_matriculas(df, clave)
     panel_path = os.path.join(snapshot_dir, 'matriculas.csv')
     panel.to_csv(panel_path, index=False, encoding='utf-8')
     _verificar_sin_pii(panel_path)
@@ -231,7 +329,10 @@ def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR):
         'generado': datetime.now(timezone.utc).isoformat(timespec='seconds'),
         'total_administradores': int(len(df)),
         'total_consorcios': int(df['CANTIDADCONSORCIOS'].sum()),
+        'matricula_maxima': int(df['MATRICULAID'].max()),
+        'ultima_actualizacion_padron': ultima_actualizacion(df),
         'fuente': 'buscador-admin-consorcio.buenosaires.gob.ar',
+        **(metadata_extra or {}),
     }
     meta_path = os.path.join(snapshot_dir, 'metadata.json')
     with open(meta_path, 'w', encoding='utf-8') as f:
@@ -240,7 +341,18 @@ def escribir_snapshot(agregados, df, snapshot, snapshots_dir=SNAPSHOTS_DIR):
     return snapshot_dir
 
 
-def main(ruta_csv='administradores.csv', snapshot=None):
+def agregados_cobertura(df, ruta_registro):
+    """Agregados y metadata de la reconciliación contra el CSV de BA Data."""
+    oficial, fecha_corte = datos_abiertos.cargar_registro(ruta_registro)
+    matriculas = df['MATRICULAID']
+    agregados = {
+        'cobertura_por_tramo': datos_abiertos.cobertura_por_tramo(matriculas, oficial),
+        'cobertura_por_anio_alta': datos_abiertos.cobertura_por_anio_alta(matriculas, oficial),
+    }
+    return agregados, datos_abiertos.resumen_cobertura(matriculas, oficial, fecha_corte)
+
+
+def main(ruta_csv='administradores.csv', snapshot=None, ruta_registro=None):
     if not os.path.exists(ruta_csv):
         raise SystemExit(
             f'No se encontró {ruta_csv}. Generalo primero con: python administradores_scraper.py'
@@ -248,10 +360,14 @@ def main(ruta_csv='administradores.csv', snapshot=None):
 
     df = cargar_administradores(ruta_csv)
     agregados = generar_agregados(df)
+    metadata_extra = {}
+    if ruta_registro:
+        cobertura, metadata_extra = agregados_cobertura(df, ruta_registro)
+        agregados.update(cobertura)
     escribir_agregados(agregados, OUTPUT_DIR)
 
     if snapshot:
-        snapshot_dir = escribir_snapshot(agregados, df, snapshot)
+        snapshot_dir = escribir_snapshot(agregados, df, snapshot, metadata_extra=metadata_extra)
         print(f'\nSnapshot {snapshot} guardado en {snapshot_dir}/')
 
     print(f'\nListo: {len(df)} administradores únicos procesados → {OUTPUT_DIR}/')
@@ -264,9 +380,12 @@ if __name__ == '__main__':
     parser.add_argument('--snapshot', nargs='?', const='__mes_actual__', default=None, metavar='YYYY-MM',
                         help='guarda además una copia fechada en data/snapshots/YYYY-MM/ '
                              '(sin valor: usa el mes actual)')
+    parser.add_argument('--datos-abiertos', metavar='CSV', default=None,
+                        help='CSV del registro oficial de BA Data (ver datos_abiertos.py) para '
+                             'medir la cobertura del buscador')
     args = parser.parse_args()
 
     snapshot = args.snapshot
     if snapshot == '__mes_actual__':
         snapshot = date.today().strftime('%Y-%m')
-    main(args.ruta_csv, snapshot=snapshot)
+    main(args.ruta_csv, snapshot=snapshot, ruta_registro=args.datos_abiertos)
