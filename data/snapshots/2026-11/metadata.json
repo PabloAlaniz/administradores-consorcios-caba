@@ -1,0 +1,14 @@
+{
+  "snapshot": "2026-11",
+  "generado": "2026-11-01T09:02:53+00:00",
+  "total_administradores": 3818,
+  "total_consorcios": 1553,
+  "matricula_maxima": 19141,
+  "ultima_actualizacion_padron": "2026-05-04",
+  "fuente": "buscador-admin-consorcio.buenosaires.gob.ar",
+  "datos_abiertos_fecha_corte": "2026-02-25",
+  "datos_abiertos_total": 8505,
+  "cobertura_en_ambos": 3817,
+  "cobertura_solo_buscador": 1,
+  "cobertura_solo_datos_abiertos": 4688
+}
